@@ -1,8 +1,8 @@
 module github.com/zosmac/gotree
 
-go 1.19
+go 1.20
 
-require github.com/zosmac/gocore v0.0.0-20230131192841-f203a6f0816a
+require github.com/zosmac/gocore v0.0.0-20230202190902-7e5934e8b51c
 
 require (
 	github.com/StackExchange/wmi v1.2.1 // indirect

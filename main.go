@@ -191,21 +191,22 @@ func flatTreeIndent(tb processTable, tr processTree, indent int) []Pid {
 
 // display shows the pid, command, arguments, and environment variables for a process.
 func display(p *process, indent int) {
-	tab := fmt.Sprintf("\n%s", strings.Repeat("\t|", indent))
-	pid := p.Pid.String()
-	pre := tab + "\033[97;40m" + "      "[:6-len(pid)] + pid
-	tab += "\t"
+	tab := strings.Repeat("|\t", indent)
+	pid := fmt.Sprintf("%s\033[97;40m%7d", tab, p.Pid)
+	tab += "|\t"
 	var cmd, args, envs string
 	if len(p.Args) > 0 {
 		cmd = p.Args[0]
 	}
 	if len(p.Args) > 1 {
-		args = "\033[m" + tab + "\033[34m" + strings.Join(p.Args[1:], "\033[m"+tab+"\033[34m")
+		guide := "\033[m\n" + tab + "\033[34m"
+		args = guide + strings.Join(p.Args[1:], guide)
 	}
 	if len(p.Envs) > 0 {
-		envs = "\033[m" + tab + "\033[35m" + strings.Join(p.Envs, "\033[m"+tab+"\033[35m")
+		guide := "\033[m\n" + tab + "\033[35m"
+		envs = guide + strings.Join(p.Envs, guide)
 	}
-	fmt.Printf("%s\033[m  %s%s%s\033[m", pre, cmd, args, envs)
+	fmt.Printf("%s\033[m %s%s%s\033[m\n", pid, cmd, args, envs)
 }
 
 // depthTree enables sort of deepest process trees first.
