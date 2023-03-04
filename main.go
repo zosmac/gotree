@@ -58,7 +58,7 @@ func main() {
 }
 
 // Main builds and displays the process tree.
-func Main(ctx context.Context) {
+func Main(ctx context.Context) error {
 	pid := 1
 	if len(os.Args) > 1 {
 		pid, _ = strconv.Atoi(os.Args[1])
@@ -66,19 +66,21 @@ func Main(ctx context.Context) {
 	tb := buildTable()
 	tr := findTree(buildTree(tb), Pid(pid))
 	flatTree(tb, tr)
+
+	return nil
 }
 
 // getPids gets the list of active processes by pid.
 func getPids() ([]Pid, error) {
 	n, err := C.proc_listpids(C.PROC_ALL_PIDS, 0, nil, 0)
 	if n <= 0 {
-		return nil, gocore.Error("proc_listpids PROC_ALL_PIDS failed", err)
+		return nil, gocore.Error("proc_listpids", err)
 	}
 
 	var pid C.int
 	buf := make([]C.int, n/C.int(unsafe.Sizeof(pid))+10)
 	if n, err = C.proc_listpids(C.PROC_ALL_PIDS, 0, unsafe.Pointer(&buf[0]), n); n <= 0 {
-		return nil, gocore.Error("proc_listpids PROC_ALL_PIDS failed", err)
+		return nil, gocore.Error("proc_listpids", err)
 	}
 	n /= C.int(unsafe.Sizeof(pid))
 	if int(n) < len(buf) {
