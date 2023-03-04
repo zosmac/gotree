@@ -1,2 +1,2 @@
 # gotree
-Go process Tree generator
+Go process Tree
