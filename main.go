@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +24,9 @@ type (
 	// Pid is the type for the process identifier.
 	Pid int
 
+	// Pids holds a list of pids.
+	Pids []Pid
+
 	// processTable defines a process table as a map of pids to processes.
 	processTable map[Pid]*process
 
@@ -33,7 +35,6 @@ type (
 
 	// process info.
 	process struct {
-		ancestors []Pid
 		Pid
 		Ppid Pid
 		CommandLine
@@ -59,19 +60,56 @@ func main() {
 
 // Main builds and displays the process tree.
 func Main(ctx context.Context) error {
-	pid := 1
-	if len(os.Args) > 1 {
-		pid, _ = strconv.Atoi(os.Args[1])
-	}
 	tb := buildTable()
-	tr := findTree(buildTree(tb), Pid(pid))
-	flatTree(tb, tr)
+	tr := buildTree(tb)
+
+	var pids Pids
+	for _, pid := range flags.pids {
+		if _, ok := tb[pid]; ok {
+			pids = append(pids, pid)
+		}
+	}
+	if len(pids) == 0 {
+		pids = Pids{1}
+	}
+
+	trx := processTree{}
+	for _, pid := range pids {
+		if len(findTree(trx, pid)) > 0 {
+			continue // pid already found
+		}
+		tr := findTree(tr, pid)
+		for pid := tb[pid].Ppid; pid > 0; pid = tb[pid].Ppid { // ancestors
+			tr = processTree{pid: tr}
+		}
+
+		// insert each process' tree into the main tree
+		tx := trx
+	loop:
+		for {
+			// descend the main tree until the place for the subtree is found
+			// each subtree has one top node, so this loop actually only has one iteration
+			if len(tr) > 1 {
+				panic(fmt.Sprintf("len %d, %#v", len(tr), tr))
+			}
+			for pid, t := range tr {
+				if ty, ok := tx[pid]; !ok {
+					tx[pid] = t
+					break loop
+				} else { // descend along the common branch
+					tr = t
+					tx = ty
+				}
+			}
+		}
+	}
+	flatTree(tb, trx)
 
 	return nil
 }
 
 // getPids gets the list of active processes by pid.
-func getPids() ([]Pid, error) {
+func getPids() (Pids, error) {
 	n, err := C.proc_listpids(C.PROC_ALL_PIDS, 0, nil, 0)
 	if n <= 0 {
 		return nil, gocore.Error("proc_listpids", err)
@@ -87,7 +125,7 @@ func getPids() ([]Pid, error) {
 		buf = buf[:n]
 	}
 
-	pids := make([]Pid, len(buf))
+	pids := make(Pids, len(buf))
 	for i, pid := range buf {
 		pids[int(n)-i-1] = Pid(pid) // Darwin returns pids in descending order, so reverse the order
 	}
@@ -103,7 +141,6 @@ func buildTable() processTable {
 
 	tb := make(map[Pid]*process, len(pids))
 	for _, pid := range pids {
-
 		var bsi C.struct_proc_bsdshortinfo
 		if n := C.proc_pidinfo(
 			C.int(pid),
@@ -116,21 +153,10 @@ func buildTable() processTable {
 		}
 
 		tb[pid] = &process{
-			ancestors:   []Pid{},
 			Pid:         pid,
 			Ppid:        Pid(bsi.pbsi_ppid),
 			CommandLine: pid.commandLine(),
 		}
-	}
-
-	for pid, p := range tb {
-		p.ancestors = func() []Pid {
-			var pids []Pid
-			for pid := tb[pid].Ppid; pid > 0; pid = tb[pid].Ppid {
-				pids = append([]Pid{pid}, pids...)
-			}
-			return pids
-		}()
 	}
 
 	return tb
@@ -139,38 +165,41 @@ func buildTable() processTable {
 // buildTree builds the process tree.
 func buildTree(tb processTable) processTree {
 	tr := processTree{}
-
-	for pid, p := range tb {
-		addPid(tr, append(p.ancestors, pid))
+	for pid := range tb {
+		var pids Pids
+		for ; pid > 0; pid = tb[pid].Ppid {
+			pids = append(Pids{pid}, pids...)
+		}
+		addPid(tr, pids)
 	}
 
 	return tr
 }
 
 // addPid adds a process into the tree.
-func addPid(tr processTree, ancestors []Pid) {
-	if len(ancestors) == 0 {
+func addPid(tr processTree, pids Pids) {
+	if len(pids) == 0 {
 		return
 	}
-	if _, ok := tr[ancestors[0]]; !ok {
-		tr[ancestors[0]] = processTree{}
+	if _, ok := tr[pids[0]]; !ok {
+		tr[pids[0]] = processTree{}
 	}
-	addPid(tr[ancestors[0]], ancestors[1:])
+	addPid(tr[pids[0]], pids[1:])
 }
 
 // flatTree starts the display of the process tree.
-func flatTree(tb processTable, tr processTree) []Pid {
+func flatTree(tb processTable, tr processTree) Pids {
 	return flatTreeIndent(tb, tr, 0)
 }
 
 // flatTreeIndent recurses through the process tree to display hierarchy of processes.
-func flatTreeIndent(tb processTable, tr processTree, indent int) []Pid {
+func flatTreeIndent(tb processTable, tr processTree, indent int) Pids {
 	if len(tr) == 0 {
 		return nil
 	}
-	var flat []Pid
+	var flat Pids
 
-	var pids []Pid
+	var pids Pids
 	for pid := range tr {
 		pids = append(pids, pid)
 	}
@@ -194,7 +223,13 @@ func flatTreeIndent(tb processTable, tr processTree, indent int) []Pid {
 // display shows the pid, command, arguments, and environment variables for a process.
 func display(p *process, indent int) {
 	tab := strings.Repeat("|\t", indent)
-	pid := fmt.Sprintf("%s\033[97;40m%7d", tab, p.Pid)
+	bg := 40 // black background for pid
+	for _, pid := range flags.pids {
+		if pid == p.Pid {
+			bg = 42 // green background for pid
+		}
+	}
+	pid := fmt.Sprintf("%s\033[97;%2dm%7d", tab, bg, p.Pid)
 	tab += "|\t"
 	var cmd, args, envs string
 	if len(p.Args) > 0 {
