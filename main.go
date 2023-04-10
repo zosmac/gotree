@@ -2,20 +2,13 @@
 
 package main
 
-/*
-#include <libproc.h>
-#include <sys/sysctl.h>
-*/
-import "C"
-
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"unsafe"
 
 	"github.com/zosmac/gocore"
 )
@@ -27,17 +20,22 @@ type (
 	// Pids holds a list of pids.
 	Pids []Pid
 
+	Table[K ~int | ~string, V any] map[K]V
+
 	// processTable defines a process table as a map of pids to processes.
-	processTable map[Pid]*process
+	processTable = Table[Pid, *process]
+
+	// Tree defines a hierarchy of objects of comparable type.
+	Tree[K ~int | ~string] map[K]Tree[K]
 
 	// processTree organizes the process into a hierarchy
-	processTree map[Pid]processTree
+	processTree = Tree[Pid]
 
 	// process info.
 	process struct {
 		Pid
 		Ppid Pid
-		CommandLine
+		*CommandLine
 	}
 
 	// CommandLine contains a process' command line arguments.
@@ -73,63 +71,41 @@ func Main(ctx context.Context) error {
 		pids = Pids{1}
 	}
 
-	trx := processTree{}
+	tra := processTree{}
 	for _, pid := range pids {
-		if len(findTree(trx, pid)) > 0 {
+		if len(tra.findTree(pid)) > 0 {
 			continue // pid already found
 		}
-		tr := findTree(tr, pid)
+		trb := tr.findTree(pid)
 		for pid := tb[pid].Ppid; pid > 0; pid = tb[pid].Ppid { // ancestors
-			tr = processTree{pid: tr}
+			trb = processTree{pid: trb}
 		}
 
 		// insert each process' tree into the main tree
-		tx := trx
+		trc := tra
 	loop:
 		for {
 			// descend the main tree until the place for the subtree is found
 			// each subtree has one top node, so this loop actually only has one iteration
-			if len(tr) > 1 {
-				panic(fmt.Sprintf("len %d, %#v", len(tr), tr))
+			if len(trb) > 1 {
+				panic(fmt.Sprintf("len %d, %#v", len(trb), trb))
 			}
-			for pid, t := range tr {
-				if ty, ok := tx[pid]; !ok {
-					tx[pid] = t
+			for pid, trd := range trb {
+				if tre, ok := trc[pid]; !ok {
+					trc[pid] = trd
 					break loop
 				} else { // descend along the common branch
-					tr = t
-					tx = ty
+					trb = trd
+					trc = tre
 				}
 			}
 		}
 	}
-	flatTree(tb, trx)
+	tra.flatTree(0, func(indent int, pid Pid) {
+		display(indent, tb[pid])
+	})
 
 	return nil
-}
-
-// getPids gets the list of active processes by pid.
-func getPids() (Pids, error) {
-	n, err := C.proc_listpids(C.PROC_ALL_PIDS, 0, nil, 0)
-	if n <= 0 {
-		return nil, gocore.Error("proc_listpids", err)
-	}
-
-	var pid C.int
-	buf := make([]C.int, n/C.int(unsafe.Sizeof(pid))+10)
-	if n, err = C.proc_listpids(C.PROC_ALL_PIDS, 0, unsafe.Pointer(&buf[0]), n); n <= 0 {
-		return nil, gocore.Error("proc_listpids", err)
-	}
-	n /= C.int(unsafe.Sizeof(pid))
-	if int(n) < len(buf) {
-		buf = buf[:n]
-	}
-
-	pids := make(Pids, len(buf))
-	for i, pid := range buf {
-		pids[int(n)-i-1] = Pid(pid) // Darwin returns pids in descending order, so reverse the order
-	}
-	return pids, nil
 }
 
 // buildTable builds a process table and captures current process state.
@@ -141,21 +117,8 @@ func buildTable() processTable {
 
 	tb := make(map[Pid]*process, len(pids))
 	for _, pid := range pids {
-		var bsi C.struct_proc_bsdshortinfo
-		if n := C.proc_pidinfo(
-			C.int(pid),
-			C.PROC_PIDT_SHORTBSDINFO,
-			0,
-			unsafe.Pointer(&bsi),
-			C.int(C.PROC_PIDT_SHORTBSDINFO_SIZE),
-		); n != C.int(C.PROC_PIDT_SHORTBSDINFO_SIZE) {
-			continue
-		}
-
-		tb[pid] = &process{
-			Pid:         pid,
-			Ppid:        Pid(bsi.pbsi_ppid),
-			CommandLine: pid.commandLine(),
+		if p := pid.process(); p != nil {
+			tb[pid] = p
 		}
 	}
 
@@ -170,87 +133,91 @@ func buildTree(tb processTable) processTree {
 		for ; pid > 0; pid = tb[pid].Ppid {
 			pids = append(Pids{pid}, pids...)
 		}
-		addPid(tr, pids)
+		tr.add(pids...)
 	}
 
 	return tr
 }
 
-// addPid adds a process into the tree.
-func addPid(tr processTree, pids Pids) {
-	if len(pids) == 0 {
-		return
+// add inserts a node into a tree.
+func (tr Tree[K]) add(nodes ...K) {
+	if len(nodes) > 0 {
+		if _, ok := tr[nodes[0]]; !ok {
+			tr[nodes[0]] = Tree[K]{}
+		}
+		tr[nodes[0]].add(nodes[1:]...)
 	}
-	if _, ok := tr[pids[0]]; !ok {
-		tr[pids[0]] = processTree{}
-	}
-	addPid(tr[pids[0]], pids[1:])
 }
 
-// flatTree starts the display of the process tree.
-func flatTree(tb processTable, tr processTree) Pids {
-	return flatTreeIndent(tb, tr, 0)
-}
-
-// flatTreeIndent recurses through the process tree to display hierarchy of processes.
-func flatTreeIndent(tb processTable, tr processTree, indent int) Pids {
+// flatTreeIndent recurses through the tree to display as a hierarchy.
+func (tr Tree[K]) flatTree(indent int, fn func(int, K)) []K {
 	if len(tr) == 0 {
 		return nil
 	}
-	var flat Pids
+	var flat []K
 
-	var pids Pids
-	for pid := range tr {
-		pids = append(pids, pid)
+	var keys []K
+	for key := range tr {
+		keys = append(keys, key)
 	}
 
-	sort.Slice(pids, func(i, j int) bool {
-		dti := depthTree(tr[pids[i]])
-		dtj := depthTree(tr[pids[j]])
+	sort.Slice(keys, func(i, j int) bool {
+		dti := tr[keys[i]].depthTree()
+		dtj := tr[keys[j]].depthTree()
 		return dti > dtj ||
-			dti == dtj && pids[i] < pids[j]
+			dti == dtj && keys[i] < keys[j]
 	})
 
-	for _, pid := range pids {
-		flat = append(flat, pid)
-		display(tb[pid], indent)
-		flat = append(flat, flatTreeIndent(tb, tr[pid], indent+1)...)
+	for _, key := range keys {
+		flat = append(flat, key)
+		fn(indent, key)
+		flat = append(flat, tr[key].flatTree(indent+1, fn)...)
 	}
 
 	return flat
 }
 
 // display shows the pid, command, arguments, and environment variables for a process.
-func display(p *process, indent int) {
+func display(indent int, p *process) {
 	tab := strings.Repeat("|\t", indent)
-	bg := 40 // black background for pid
-	for _, pid := range flags.pids {
-		if pid == p.Pid {
-			bg = 42 // green background for pid
+	var pid string
+	if flags.verbose {
+		bg := 44 // blue background for pid
+		for _, pid := range flags.pids {
+			if pid == p.Pid {
+				bg = 41 // red background for pid
+			}
 		}
+		pid = fmt.Sprintf("%s\033[97;%2dm%7d", tab, bg, p.Pid)
+	} else {
+		pid = fmt.Sprintf("%s%7d", tab, p.Pid)
 	}
-	pid := fmt.Sprintf("%s\033[97;%2dm%7d", tab, bg, p.Pid)
 	tab += "|\t"
+
 	var cmd, args, envs string
 	if len(p.Args) > 0 {
 		cmd = p.Args[0]
 	}
-	if len(p.Args) > 1 {
-		guide := "\033[m\n" + tab + "\033[34m"
-		args = guide + strings.Join(p.Args[1:], guide)
-	}
-	if len(p.Envs) > 0 {
-		guide := "\033[m\n" + tab + "\033[35m"
-		envs = guide + strings.Join(p.Envs, guide)
+	if flags.verbose {
+		if len(p.Args) > 1 {
+			guide := "\033[m\n" + tab + "\033[34m"
+			args = guide + strings.Join(p.Args[1:], guide)
+		}
+		if len(p.Envs) > 0 {
+			guide := "\033[m\n" + tab + "\033[35m"
+			envs = guide + strings.Join(p.Envs, guide)
+		}
+	} else {
+		cmd = filepath.Base(cmd)
 	}
 	fmt.Printf("%s\033[m %s%s%s\033[m\n", pid, cmd, args, envs)
 }
 
 // depthTree enables sort of deepest process trees first.
-func depthTree(tr processTree) int {
+func (tr Tree[K]) depthTree() int {
 	depth := 0
 	for _, tree := range tr {
-		dt := depthTree(tree) + 1
+		dt := tree.depthTree() + 1
 		if depth < dt {
 			depth = dt
 		}
@@ -258,53 +225,16 @@ func depthTree(tr processTree) int {
 	return depth
 }
 
-// findTree finds the process tree parented by a specific process.
-func findTree(tr processTree, parent Pid) processTree {
-	for pid, tr := range tr {
-		if pid == parent {
-			return processTree{parent: tr}
+// findTree finds the subtree anchored by a specific node.
+func (tr Tree[K]) findTree(node K) Tree[K] {
+	for key, tr := range tr {
+		if key == node {
+			return Tree[K]{node: tr}
 		}
-		if tr = findTree(tr, parent); tr != nil {
+		if tr = tr.findTree(node); tr != nil {
 			return tr
 		}
 	}
 
 	return nil
-}
-
-// commandLine retrieves process command, arguments, and environment.
-func (pid Pid) commandLine() CommandLine {
-	size := C.size_t(C.ARG_MAX)
-	buf := make([]byte, size)
-
-	if rv := C.sysctl(
-		&[]C.int{C.CTL_KERN, C.KERN_PROCARGS2, C.int(pid)}[0],
-		3,
-		unsafe.Pointer(&buf[0]),
-		&size,
-		unsafe.Pointer(nil),
-		0,
-	); rv != 0 {
-		return CommandLine{}
-	}
-
-	l := int(*(*uint32)(unsafe.Pointer(&buf[0])))
-	ss := bytes.FieldsFunc(buf[4:size], func(r rune) bool { return r == 0 })
-	var executable string
-	var args, envs []string
-	for i, s := range ss {
-		if i == 0 {
-			executable = string(s)
-		} else if i <= l {
-			args = append(args, string(s))
-		} else {
-			envs = append(envs, string(s))
-		}
-	}
-
-	return CommandLine{
-		Executable: executable,
-		Args:       args,
-		Envs:       envs,
-	}
 }

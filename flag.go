@@ -13,7 +13,8 @@ import (
 var (
 	// flags defines the command line flags.
 	flags = struct {
-		pids Pids
+		verbose bool
+		pids    Pids
 	}{}
 )
 
@@ -22,10 +23,17 @@ func init() {
 	gocore.Flags.CommandDescription = `The gotree command prints a tree listing of the processes running currently on the system.`
 
 	gocore.Flags.Var(
+		&flags.verbose,
+		"verbose",
+		"[-verbose]",
+		"Include full command path, arguments, and environment variables for each process in the list",
+	)
+
+	gocore.Flags.Var(
 		&flags.pids,
 		"pids",
 		"[-pids <pid>[,<pid>...]]",
-		"Print process tree for specific processes selected with comma separated list of `pids`",
+		"Print process tree for specific processes selected with comma separated list `pid[,pid...]`",
 	)
 }
 
