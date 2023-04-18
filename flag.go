@@ -10,11 +10,16 @@ import (
 	"github.com/zosmac/gocore"
 )
 
+type (
+	// flagpids, because []Pid cannot be a receiver type for flag.Value Set and String.
+	flagpids []Pid
+)
+
 var (
 	// flags defines the command line flags.
 	flags = struct {
 		verbose bool
-		pids    Pids
+		pids    flagpids
 	}{}
 )
 
@@ -38,8 +43,8 @@ func init() {
 }
 
 // Set is a flag.Value interface method to enable logLevel as a command line flag.
-func (pids *Pids) Set(arg string) error {
-	*pids = Pids{}
+func (pids *flagpids) Set(arg string) error {
+	*pids = []Pid{}
 	args := strings.Split(arg, ",")
 	for _, arg := range args {
 		pid, err := strconv.Atoi(arg)
@@ -52,7 +57,7 @@ func (pids *Pids) Set(arg string) error {
 }
 
 // String is a flag.Value interface method to enable logLevel as a command line flag.
-func (pids Pids) String() string {
+func (pids flagpids) String() string {
 	var args []string
 	for _, pid := range pids {
 		args = append(args, strconv.Itoa(int(pid)))

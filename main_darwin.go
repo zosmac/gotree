@@ -15,7 +15,7 @@ import (
 )
 
 // getPids gets the list of active processes by pid.
-func getPids() (Pids, error) {
+func getPids() ([]Pid, error) {
 	n, err := C.proc_listpids(C.PROC_ALL_PIDS, 0, nil, 0)
 	if n <= 0 {
 		return nil, gocore.Error("proc_listpids", err)
@@ -31,7 +31,7 @@ func getPids() (Pids, error) {
 		buf = buf[:n]
 	}
 
-	pids := make(Pids, len(buf))
+	pids := make([]Pid, len(buf))
 	for i, pid := range buf {
 		pids[int(n)-i-1] = Pid(pid) // Darwin returns pids in descending order, so reverse the order
 	}
@@ -50,20 +50,15 @@ func (pid Pid) process() *process {
 		return nil
 	}
 
-	cl := pid.commandLine()
-	if cl == nil {
-		return nil
-	}
-
 	return &process{
 		Pid:         pid,
 		Ppid:        Pid(bsi.pbsi_ppid),
-		CommandLine: cl,
+		CommandLine: pid.commandLine(),
 	}
 }
 
 // commandLine retrieves process command, arguments, and environment.
-func (pid Pid) commandLine() *CommandLine {
+func (pid Pid) commandLine() CommandLine {
 	size := C.size_t(C.ARG_MAX)
 	buf := make([]byte, size)
 
@@ -75,7 +70,7 @@ func (pid Pid) commandLine() *CommandLine {
 		unsafe.Pointer(nil),
 		0,
 	); rv != 0 {
-		return nil
+		return CommandLine{}
 	}
 
 	l := int(*(*uint32)(unsafe.Pointer(&buf[0])))
@@ -92,7 +87,7 @@ func (pid Pid) commandLine() *CommandLine {
 		}
 	}
 
-	return &CommandLine{
+	return CommandLine{
 		Executable: executable,
 		Args:       args,
 		Envs:       envs,
