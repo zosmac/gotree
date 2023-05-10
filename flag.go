@@ -60,7 +60,7 @@ func (pids *flagpids) Set(arg string) error {
 func (pids flagpids) String() string {
 	var args []string
 	for _, pid := range pids {
-		args = append(args, strconv.Itoa(int(pid)))
+		args = append(args, pid.String())
 	}
 	return strings.Join(args, ",")
 }
