@@ -20,7 +20,10 @@ type (
 	table = gocore.Table[Pid, *process]
 
 	// tree organizes the process into a hierarchy
-	tree = gocore.Tree[Pid, int, *process]
+	tree = gocore.Tree[Pid]
+
+	// meta defines the metadata for the tree.
+	meta = gocore.Meta[Pid, *process, int]
 
 	// process info.
 	process struct {
@@ -93,7 +96,7 @@ func Main(ctx context.Context) error {
 		}
 	}
 
-	order := func(node Pid, _ table) int {
+	order := func(node Pid, _ *process) int {
 		tr = tra.FindTree(node)
 		var depth int
 		for _, tr := range tr {
@@ -105,12 +108,10 @@ func Main(ctx context.Context) error {
 		return depth
 	}
 
-	tra.Traverse(
-		0,
-		tb,
-		order,
-		display,
-	)
+	meta := meta{Tree: tra, Table: tb, Order: order}
+	for depth, pid := range meta.All() {
+		display(depth, pid, tb[pid])
+	}
 
 	return nil
 }
@@ -158,8 +159,7 @@ func buildTree(tb table) tree {
 }
 
 // display shows the pid, command, arguments, and environment variables for a process.
-func display(indent int, pid Pid, pt table) {
-	p := pt[pid]
+func display(indent int, _ Pid, p *process) {
 	tab := strings.Repeat("|\t", indent)
 	var s string
 	if flags.verbose {
