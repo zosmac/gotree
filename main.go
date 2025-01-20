@@ -96,20 +96,12 @@ func Main(ctx context.Context) error {
 		}
 	}
 
-	order := func(node Pid, _ *process) int {
-		tr = tra.FindTree(node)
-		var depth int
-		for _, tr := range tr {
-			dt := depthTree(tr) + 1
-			if depth < dt {
-				depth = dt
-			}
-		}
-		return depth
-	}
-
-	meta := meta{Tree: tra, Table: tb, Order: order}
-	for depth, pid := range meta.All() {
+	for depth, pid := range (meta{
+		Tree:  tra,
+		Table: tb,
+		Order: func(node Pid, _ *process) int {
+			return depthTree(tra.FindTree(node))
+		}}).All() {
 		display(depth, pid, tb[pid])
 	}
 
@@ -120,10 +112,7 @@ func Main(ctx context.Context) error {
 func depthTree(tr tree) int {
 	depth := 0
 	for _, tr := range tr {
-		dt := depthTree(tr) + 1
-		if depth < dt {
-			depth = dt
-		}
+		depth = max(depth, depthTree(tr)+1)
 	}
 	return depth
 }
