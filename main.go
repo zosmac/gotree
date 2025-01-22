@@ -23,7 +23,7 @@ type (
 	tree = gocore.Tree[Pid]
 
 	// meta defines the metadata for the tree.
-	meta = gocore.Meta[Pid, *process, int]
+	meta = gocore.Meta[Pid, *process, string]
 
 	// process info.
 	process struct {
@@ -99,8 +99,13 @@ func Main(ctx context.Context) error {
 	for depth, pid := range (meta{
 		Tree:  tra,
 		Table: tb,
-		Order: func(node Pid, _ *process) int {
-			return depthTree(tra.FindTree(node))
+		// Order: func(node Pid, _ *process) int {
+		// 	return depthTree(tra.FindTree(node))
+		Order: func(node Pid, p *process) string {
+			if len(p.Args) == 0 {
+				return "."
+			}
+			return filepath.Base(p.Args[0])
 		}}).All() {
 		display(depth, pid, tb[pid])
 	}
