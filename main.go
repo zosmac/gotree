@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -15,15 +16,6 @@ import (
 type (
 	// Pid is the type for the process identifier.
 	Pid int
-
-	// table defines a process table as a map of pids to processes.
-	table = gocore.Table[Pid, *process]
-
-	// tree organizes the process into a hierarchy
-	tree = gocore.Tree[Pid]
-
-	// meta defines the metadata for the tree.
-	meta = gocore.Meta[Pid, *process, string]
 
 	// process info.
 	process struct {
@@ -38,6 +30,12 @@ type (
 		Args       []string `json:"args" gomon:"property"`
 		Envs       []string `json:"envs" gomon:"property"`
 	}
+
+	// tree alias organizes the process pids into a hierarchy.
+	tree = gocore.Tree[Pid]
+
+	// table alias defines a process table as a map of pids to processes.
+	table = gocore.Table[Pid, *process]
 )
 
 // String renders the pid.
@@ -61,65 +59,26 @@ func Main(ctx context.Context) error {
 			pids = append(pids, pid)
 		}
 	}
-	if len(pids) == 0 {
-		pids = []Pid{1}
+	if len(pids) > 0 {
+		pt := table{}
+		for _, pid := range pids {
+			for _, pid := range tr.Family(pid).All() {
+				pt[pid] = tb[pid]
+			}
+		}
+		tr = buildTree(pt)
 	}
 
-	tra := tree{}
-	for _, pid := range pids {
-		if len(tra.FindTree(pid)) > 0 {
-			continue // pid already found
-		}
-		trb := tr.FindTree(pid)
-		for pid := tb[pid].Ppid; pid > 0; pid = tb[pid].Ppid { // ancestors
-			trb = tree{pid: trb}
-		}
-
-		// insert each process' tree into the main tree
-		trc := tra
-	loop:
-		for {
-			// descend the main tree until the place for the subtree is found
-			// each subtree has one top node, so this loop actually only has one iteration
-			if len(trb) > 1 {
-				panic(fmt.Sprintf("len %d, %#v", len(trb), trb))
-			}
-			for pid, trd := range trb {
-				if tre, ok := trc[pid]; !ok {
-					trc[pid] = trd
-					break loop
-				} else { // descend along the common branch
-					trb = trd
-					trc = tre
-				}
-			}
-		}
-	}
-
-	for depth, pid := range (meta{
-		Tree:  tra,
-		Table: tb,
-		// Order: func(node Pid, _ *process) int {
-		// 	return depthTree(tra.FindTree(node))
-		Order: func(node Pid, p *process) string {
-			if len(p.Args) == 0 {
-				return "."
-			}
-			return filepath.Base(p.Args[0])
-		}}).All() {
+	for depth, pid := range tr.SortedFunc(func(a, b Pid) int {
+		return cmp.Or(
+			cmp.Compare(filepath.Base(tb[a].Executable), filepath.Base(tb[b].Executable)),
+			cmp.Compare(a, b),
+		)
+	}) {
 		display(depth, pid, tb[pid])
 	}
 
 	return nil
-}
-
-// depthTree enables sort of deepest process trees first.
-func depthTree(tr tree) int {
-	depth := 0
-	for _, tr := range tr {
-		depth = max(depth, depthTree(tr)+1)
-	}
-	return depth
 }
 
 // buildTable builds a process table and captures current process state.

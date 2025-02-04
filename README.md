@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `gotree` command prints a tree listing of the processes on the system. The tree organizes the processes by parent/child relationships and lists the processes with the deepest descendents first. Each process in the listing shows the pid and the command name.
+The `gotree` command prints a tree listing of the processes on the system. The tree organizes the processes by parent/child relationships and lists the processes with the deepest descendants first. Each process in the listing shows the pid and the command name.
 
 The `gotree` command accepts the following optional flags:
 
