@@ -2,7 +2,7 @@ module github.com/zosmac/gotree
 
 go 1.24.0
 
-require github.com/zosmac/gocore v0.0.0-20250215235941-b4ecec07c52d
+require github.com/zosmac/gocore v0.0.0-20250219174039-a0df02b0bbd9
 
 require (
 	github.com/StackExchange/wmi v1.2.1 // indirect

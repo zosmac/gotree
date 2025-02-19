@@ -31,9 +31,6 @@ type (
 		Envs       []string `json:"envs" gomon:"property"`
 	}
 
-	// tree alias organizes the process pids into a hierarchy.
-	tree = gocore.Tree[Pid]
-
 	// table alias defines a process table as a map of pids to processes.
 	table = gocore.Table[Pid, *process]
 )
@@ -51,7 +48,7 @@ func main() {
 // Main builds and displays the process tree.
 func Main(ctx context.Context) error {
 	tb := buildTable()
-	tr := buildTree(tb)
+	tr := tb.BuildTree()
 
 	var pids []Pid
 	for _, pid := range flags.pids {
@@ -66,10 +63,10 @@ func Main(ctx context.Context) error {
 				pt[pid] = tb[pid]
 			}
 		}
-		tr = buildTree(pt)
+		tr = pt.BuildTree()
 	}
 
-	for depth, pid := range tr.SortedFunc(func(a, b Pid) int {
+	for depth, pid := range tr.Ordered(func(a, b Pid) int {
 		return cmp.Or(
 			cmp.Compare(filepath.Base(tb[a].Executable), filepath.Base(tb[b].Executable)),
 			cmp.Compare(a, b),
@@ -96,19 +93,6 @@ func buildTable() table {
 	}
 
 	return tb
-}
-
-// buildTree builds the process tree.
-func buildTree(tb table) tree {
-	tr := tree{}
-	for pid := range tb {
-		var pids []Pid
-		for ; pid > 0; pid = tb[pid].Ppid {
-			pids = append([]Pid{pid}, pids...)
-		}
-		tr.Add(pids...)
-	}
-	return tr
 }
 
 // display shows the pid, command, arguments, and environment variables for a process.
@@ -145,4 +129,15 @@ func display(indent int, _ Pid, p *process) {
 		cmd = filepath.Base(cmd)
 	}
 	fmt.Printf("%s\033[m %s%s%s\033[m\n", s, cmd, args, envs)
+}
+
+func (p *process) HasParent() bool {
+	return p.Ppid > 0
+}
+
+func (p *process) Parent() (pid Pid) {
+	if p.Ppid > 0 {
+		pid = p.Ppid
+	}
+	return
 }
